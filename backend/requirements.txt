@@ -1,0 +1,5 @@
+bson
+faiss-cpu
+numpy
+pymongo
+langchain-core
