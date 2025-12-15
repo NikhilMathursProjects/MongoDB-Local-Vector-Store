@@ -1,8 +1,17 @@
+Mark whatever is done 
 Features to add:
-- update the failure mechanisms to ensure that we check if the db was updated but not the faiss idx and vice versa [ Consistency ]
+- update the failure mechanisms to ensure that we check if the db was updated but not the faiss idx and vice versa [ Consistency ], \
+    eg: mongo write succeeds, FAISS fails
 - Easy to see benchmarks, logs, comparisons, tables, graphs per VS (Vector Search) type
 - Lucene 
 - Async
 - proper imports and error logging etc
 - Page that allows users to compare between base MongoDB VS, FAISS VS and Lucene VS
 - Allow user to switch between base, FAISS and Lucene easily while keeping data consistent
+- Expose internal state and health of the vector store, Store index metadata in Mongo
+- Since I have save and load faiss index [FAISS version] , we have to save the index on closing, and load it on startup 
+    check how to keep it safe and stored so even if the app crashes the index remains safe and updated (lazy loading or whatever)
+    gotta keep track of how large the index becomes cause if its too massive, will be tough on loading (may even crash everyhting)
+- ML infra (keep updating the index retraining etc thresholds based on current data) or whatever we can do in ML for better performance and scalabilitry
+- hybrid search (dense, sparse)
+- Security things if possible : Input val and all that
