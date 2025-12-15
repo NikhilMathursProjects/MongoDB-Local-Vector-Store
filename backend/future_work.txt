@@ -1,0 +1,8 @@
+Features to add:
+- update the failure mechanisms to ensure that we check if the db was updated but not the faiss idx and vice versa [ Consistency ]
+- Easy to see benchmarks, logs, comparisons, tables, graphs per VS (Vector Search) type
+- Lucene 
+- Async
+- proper imports and error logging etc
+- Page that allows users to compare between base MongoDB VS, FAISS VS and Lucene VS
+- Allow user to switch between base, FAISS and Lucene easily while keeping data consistent

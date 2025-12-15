@@ -15,6 +15,9 @@ from langchain_community.embeddings import FakeEmbeddings
 from langchain_community.embeddings import DeterministicFakeEmbedding
 
 from langchain_community.vectorstores.mongodb_local import MongoDBLocalVectorSearch
+# pytestmark = pytest.mark.skipif(
+#     not FAISS_AVAILABLE, reason="faiss-cpu is not installed"
+# )
 
 INDEX_NAME = "langchain-test-index"
 NAMESPACE = "langchain_test_db.langchain_test_collection"
@@ -72,7 +75,6 @@ class TestMongoDBLocalVectorSearch:
         texts=[]
         metadatas=[]
         for doc in documents:
-            doc_json=doc.to_json()
             texts.append(doc.page_content)
             metadatas.append(doc.metadata)
 
@@ -107,7 +109,6 @@ class TestMongoDBLocalVectorSearch:
         texts=[]
         metadatas=[]
         for doc in documents:
-            doc_json=doc.to_json()
             texts.append(doc.page_content)
             metadatas.append(doc.metadata)
 
@@ -142,7 +143,6 @@ class TestMongoDBLocalVectorSearch:
         texts=[]
         metadatas=[]
         for doc in documents:
-            doc_json=doc.to_json()
             texts.append(doc.page_content)
             metadatas.append(doc.metadata)
 
@@ -183,7 +183,6 @@ class TestMongoDBLocalVectorSearch:
         texts=[]
         metadatas=[]
         for doc in documents:
-            doc_json=doc.to_json()
             texts.append(doc.page_content)
             metadatas.append(doc.metadata)
 
@@ -224,7 +223,6 @@ class TestMongoDBLocalVectorSearch:
         texts=[]
         metadatas=[]
         for doc in documents:
-            doc_json=doc.to_json()
             texts.append(doc.page_content)
             metadatas.append(doc.metadata)
 
@@ -265,7 +263,6 @@ class TestMongoDBLocalVectorSearch:
         texts=[]
         metadatas=[]
         for doc in documents:
-            doc_json=doc.to_json()
             texts.append(doc.page_content)
             metadatas.append(doc.metadata)
 
@@ -432,3 +429,115 @@ class TestMongoDBLocalVectorSearch:
         #no need to sleep as it immediately updates the index
         output = vectorstore.similarity_search("Sandwich", k=1)
         assert output[0][0].page_content == "What is a sandwich?"  
+    
+    def test_from_documents_euclid_flat(
+        self , collection: Any
+    ) -> None:
+        """Test end to end construction and search."""
+        documents = [
+            Document(page_content="Dogs are tough.", metadata={"a": 1}),
+            Document(page_content="Cats have fluff.", metadata={"b": 1}),
+            Document(page_content="What is a sandwich?", metadata={"c": 1}),
+            Document(page_content="That fence is purple.", metadata={"d": 1, "e": 2}),
+        ]
+        faiss_config={
+            'metric':'euclidean',
+            'index_type':'flat'
+            }
+        
+        texts=[]
+        metadatas=[]
+        for doc in documents:
+            texts.append(doc.page_content)
+            metadatas.append(doc.metadata)
+
+        vectorstore = MongoDBLocalVectorSearch(
+            faiss_config=faiss_config,
+            embedder_model=_EMBEDDING_FUNCTION,
+            collection=collection,
+            index_name=INDEX_NAME,
+        )
+        vectorstore.add_texts(texts=texts,metadatas=metadatas)
+        output = vectorstore.similarity_search(query="Sandwich", k=1,pre_filter_query={'c':1})
+        assert len(output)==1
+        assert isinstance(output[0][0], Document)
+        assert output[0][0].page_content == "What is a sandwich?"
+        assert output[0][0].metadata["c"] == 1
+
+    def test_from_documents_cosine_hnsw(
+        self , collection: Any
+    ) -> None:
+        """Test end to end construction and search."""
+        documents = [
+            Document(page_content="Dogs are tough.", metadata={"a": 1}),
+            Document(page_content="Cats have fluff.", metadata={"b": 1}),
+            Document(page_content="What is a sandwich?", metadata={"c": 1}),
+            Document(page_content="That fence is purple.", metadata={"d": 1, "e": 2}),
+        ]
+        faiss_config={
+            'metric':'cosine',
+            'index_type':'hnsw',
+            'index_params':{
+                'dimensions':_dimension,
+                'neighbours':32,
+                'efSearch':64,
+                'efConstruction':200,
+                }
+            }
+        
+        texts=[]
+        metadatas=[]
+        for doc in documents:
+            texts.append(doc.page_content)
+            metadatas.append(doc.metadata)
+
+        vectorstore = MongoDBLocalVectorSearch(
+            faiss_config=faiss_config,
+            embedder_model=_EMBEDDING_FUNCTION,
+            collection=collection,
+            index_name=INDEX_NAME,
+        )
+        vectorstore.add_texts(texts=texts,metadatas=metadatas)
+        output = vectorstore.similarity_search(query="Sandwich", k=1,pre_filter_query={'c':1})
+        assert len(output)==1
+        assert isinstance(output[0][0], Document)
+        assert output[0][0].page_content == "What is a sandwich?"
+        assert output[0][0].metadata["c"] == 1
+
+    def test_save_and_load_faiss(
+            self,collection: Any
+    )->None:
+        faiss_config={
+            'metric':'cosine',
+            'index_type':'flat',
+            'index_params':{
+                'dimensions':_dimension,
+                'neighbours':32,
+                'efSearch':64,
+                'efConstruction':200,
+                }
+        }
+        documents = [
+            Document(page_content="Dogs are tough.", metadata={"a": 1}),
+            Document(page_content="Cats have fluff.", metadata={"b": 1}),
+            Document(page_content="What is a sandwich?", metadata={"c": 1}),
+            Document(page_content="That fence is purple.", metadata={"d": 1, "e": 2}),
+        ]
+        texts=[]
+        metadatas=[]
+        for doc in documents:
+            texts.append(doc.page_content)
+            metadatas.append(doc.metadata)
+        
+        faiss_index_path='index.bin'
+        faiss_id_map_path='index.txt'
+        vectorstore=MongoDBLocalVectorSearch(
+            collection=collection,
+            faiss_config=faiss_config,
+            embedder_model=_EMBEDDING_FUNCTION,
+            index_name=INDEX_NAME,
+        )
+        # vectorstore.save_faiss(index_path=faiss_index_path,id_map_path=faiss_id_map_path)
+        vectorstore.load_faiss(index_path=faiss_index_path,id_map_path=faiss_id_map_path)
+        assert type(vectorstore._faiss_index) == 'faiss.swigfaiss_avx2.IndexIDMap'
+        

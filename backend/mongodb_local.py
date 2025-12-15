@@ -1,6 +1,5 @@
 #--------VERSION 1--------
 #This version will only have the 'flat' and 'hnsw' index_types with all 3 metrics (euclidean,dot,cosine)
-#This is just like what Atlas gives
 """
 FAISS Index types:
     Flat
@@ -30,12 +29,12 @@ so i have these functions:
 
     load_faiss(index_path,id_map_path):
             tries to read the faiss index from disk using faiss.read_index
-            Opens the path to id mapping using pickle and assigns it to (_faiss_to_mongo_id) and logs it as successfully done
+            Opens the path to id mapping using bson and assigns it to (_faiss_to_mongo_id) and logs it as successfully done
             Otherwise there is an exception
 
     save_faiss(index_path,id_map_path):
             tried to write the faiss index to index path using faiss.write_index
-            Then opens the filepath with pickle and dumps the mongo to faiss ids and logs success
+            Then opens the filepath with bson and dumps the mongo to faiss ids and logs success
             otherwise an exception which gets logged
 
     from_connection_string: 
@@ -88,6 +87,7 @@ except ImportError:
     FAISS_AVAILABLE = False
 
 try:
+    import bson
     from bson import ObjectId
     BSON_AVAILABLE=True
 except ImportError:
@@ -109,7 +109,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_INSERT_BATCH_SIZE = 100
 
 #FAISS index creation helper functions
-def euclid_flat_faiss(dimensions:int):
+def euclid_flat_faiss(dimensions:int,*kwargs: Any):
     """Returns a FAISS Flat Euclidean index (exact search)."""
     index = faiss.IndexFlatL2(dimensions)
     index = faiss.IndexIDMap(index)
@@ -151,7 +151,7 @@ def euclid_hnsw_faiss(
 #     quantizer = faiss.IndexHNSWFlat(dimensions, neighbours, faiss.METRIC_L2)
 #     return faiss.IndexIVFPQ(quantizer, dimensions, clusters, m, nbits, faiss.METRIC_L2)
 
-def dot_flat_faiss(dimensions):
+def dot_flat_faiss(dimensions,*kwargs:Any):
     """Returns a FAISS Flat index with Dot Product (exact search)."""
     index=faiss.IndexFlat(dimensions, faiss.METRIC_INNER_PRODUCT)
     index = faiss.IndexIDMap(index)
@@ -185,7 +185,7 @@ def dot_hnsw_faiss(
 #     quantizer = faiss.IndexHNSWFlat(dimensions, neighbours, faiss.METRIC_INNER_PRODUCT)
 #     return faiss.IndexIVFPQ(quantizer, dimensions, clusters, m, nbits, faiss.METRIC_INNER_PRODUCT)
 
-def cosine_flat_faiss(dimensions):
+def cosine_flat_faiss(dimensions,**kwargs:Any):
     """Returns a FAISS Flat index with Cosine similarity (via inner product)."""
     index=faiss.IndexFlat(dimensions, faiss.METRIC_INNER_PRODUCT)
     index = faiss.IndexIDMap(index)
@@ -310,10 +310,10 @@ class MongoDBLocalVectorSearch(VectorStore):
         # self._ivf_train_delay=ivf_train_delay
         
         #Initializes the index to none and the faiss_to_mongo id mapping to an empty dict
-        self._faiss_index = None #faiss index
-        self._faiss_to_mongo_id = {} #id mapping dict
-        self._deleted_faiss_ids=set() #all deleted ids dict
-        self._next_faiss_id:int=1 #helper variable for data insertion
+        self._faiss_index: Any = None #faiss index
+        self._faiss_to_mongo_id: Dict[str|Any] = {} #id mapping dict
+        self._deleted_faiss_ids: int=set() #all deleted ids dict
+        self._next_faiss_id: int=1 #helper variable for data insertion
         # self._total_embeddings:int=0 #helper for ivf training
 
         #loads or inits a faiss index
@@ -687,6 +687,7 @@ class MongoDBLocalVectorSearch(VectorStore):
         query: str,
         query_embedding: Optional[List[float]] = None,
         k: int = 4,
+        pre_filter_query:Optional[Dict[str,Any]] = None,
         post_filter_query: Optional[Dict[str, Any]] = None
     ) -> List[Tuple[Document, float]]:
         """Perform FAISS similarity search and return top-k (Document, score) tuples."""
@@ -703,25 +704,42 @@ class MongoDBLocalVectorSearch(VectorStore):
 
         if self._faiss_config.get('metric') == 'cosine':
             faiss.normalize_L2(query_embedding)
-        
-        overfetch_factor = self._faiss_config.get('overfetch_factor', 5)
-        distances, indices = self._faiss_index.search(query_embedding, k * overfetch_factor)
-
-        allowed_mongo_ids = None
-        if post_filter_query:
-            _, mids = self.queryfilter(post_filter_query)
-            allowed_mongo_ids = set(mids)
 
         candidates = []
-        for dist, idx in zip(distances[0], indices[0]):
-            if idx == -1 or idx not in self._faiss_to_mongo_id or idx in self._deleted_faiss_ids:
-                continue
-            mongo_id = self._faiss_to_mongo_id[idx]
-            if allowed_mongo_ids and mongo_id not in allowed_mongo_ids:
-                continue
-            candidates.append((idx, mongo_id, dist))
-            # if len(candidates) >= k * 2:  # safety cap
-            #     break
+        if post_filter_query:
+            overfetch_factor = self._faiss_config.get('overfetch_factor', 5)
+            distances, indices = self._faiss_index.search(query_embedding, k * overfetch_factor)
+            allowed_mongo_ids = None
+            _, mids = self.queryfilter(post_filter_query)
+            allowed_mongo_ids = set(mids)
+            for dist, idx in zip(distances[0], indices[0]):
+                if idx == -1 or idx not in self._faiss_to_mongo_id or idx in self._deleted_faiss_ids:
+                    continue
+                mongo_id = self._faiss_to_mongo_id[idx]
+                if allowed_mongo_ids and mongo_id not in allowed_mongo_ids:
+                    continue
+                candidates.append((idx, mongo_id, dist))
+                # if len(candidates) >= k * 2:  # safety cap
+                #     break
+        elif pre_filter_query:
+            fids,mids=self.queryfilter(pre_filter_query)
+            selector = faiss.IDSelectorBatch(fids)
+            params = faiss.SearchParameters() # Or specific one like SearchParametersIVF
+            params.sel = selector
+            distances,indices=self._faiss_index.search(query_embedding,k,params=params)
+            for dist, idx in zip(distances[0], indices[0]):
+                if idx == -1 or idx not in self._faiss_to_mongo_id or idx in self._deleted_faiss_ids:
+                    continue
+                mongo_id = self._faiss_to_mongo_id[idx]
+                candidates.append((idx, mongo_id, dist))
+        else:
+            distances,indices=self._faiss_index.search(query_embedding,k)
+            for dist, idx in zip(distances[0], indices[0]):
+                if idx == -1 or idx not in self._faiss_to_mongo_id or idx in self._deleted_faiss_ids:
+                    continue
+                mongo_id = self._faiss_to_mongo_id[idx]
+                candidates.append((idx, mongo_id, dist))
+        
         if not candidates:
             return []
 
@@ -755,6 +773,7 @@ class MongoDBLocalVectorSearch(VectorStore):
             query:str,
             query_embedding:List['float']=None,
             k:int=5,
+            pre_filter_query:Optional[Dict[str,Any]] = None,
             post_filter_query: Optional[List[Dict[str,Any]]]=None,
         )->List[Tuple[Document,float]]:
 
@@ -762,6 +781,7 @@ class MongoDBLocalVectorSearch(VectorStore):
                 query=query,
                 query_embedding=query_embedding,
                 k=k,
+                pre_filter_query=pre_filter_query,
                 post_filter_query=post_filter_query
             )
             return result       
@@ -771,12 +791,14 @@ class MongoDBLocalVectorSearch(VectorStore):
             query:str,
             query_embedding:List['float']=None,
             k:int=5,
+            pre_filter_query:Optional[Dict[str,Any]] = None,
             post_filter_query:Optional[List[Dict[str,Any]]]=None,
         )->List[Document]:
         result=self._similarity_search_with_score(
             query=query,
             query_embedding=query_embedding,
             k=k,
+            pre_filter_query=pre_filter_query,
             post_filter_query=post_filter_query
         )
         return result
