@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Search, FileText, Settings, Database, Filter, Plus, Download, Edit3, Trash2, List, Code, MoreHorizontal } from 'lucide-react';
+import { Search, FileText, Settings, Database, Filter, Plus, Download, Edit3, Trash2, List, Code, MoreHorizontal, Activity } from 'lucide-react';
+import BenchmarksTab from './BenchmarksTab';
 
 const Workstation = ({ connection, database, collection }) => {
     const [activeTab, setActiveTab] = useState('documents'); // 'documents', 'indexes', 'search'
@@ -62,7 +63,7 @@ const Workstation = ({ connection, database, collection }) => {
 
             {/* Main Tabs */}
             <div className="px-6 pt-4 border-b border-gray-200 flex gap-6 bg-white">
-                {['Documents', 'Indexes', 'Vector Search'].map(tab => (
+                {['Documents', 'Indexes', 'Vector Search', 'Benchmarks'].map(tab => (
                     <button
                         key={tab}
                         onClick={() => setActiveTab(tab.toLowerCase().replace(' ', '_'))}
@@ -148,7 +149,7 @@ const Workstation = ({ connection, database, collection }) => {
                                         <div key={key} className="flex gap-2 leading-relaxed">
                                             <span className="text-gray-500 w-32 flex-shrink-0 text-right select-none">{key} :</span>
                                             <span className={`${typeof value === 'string' ? 'text-green-700' :
-                                                    typeof value === 'number' ? 'text-blue-600' : 'text-gray-800'
+                                                typeof value === 'number' ? 'text-blue-600' : 'text-gray-800'
                                                 } truncate`}>
                                                 {formatValue(value)}
                                             </span>
@@ -231,6 +232,11 @@ const Workstation = ({ connection, database, collection }) => {
                             )}
                         </div>
                     </div>
+                )}
+
+                {/* Benchmarks Tab */}
+                {activeTab === 'benchmarks' && (
+                    <BenchmarksTab connection={connection} />
                 )}
 
             </div>
