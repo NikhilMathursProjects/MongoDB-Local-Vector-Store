@@ -2,17 +2,16 @@ import os
 import logging
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Body
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pymongo import MongoClient
 import numpy as np
 import hashlib
 
 # Import the backend library
-# Adjust import path if needed depending on where this is run
 try:
     from backend.mongodb_local import MongoDBLocalVectorSearch
 except ImportError:
-    # If running from root, this import might work slightly differently or need path adjustment
     import sys
     sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
     from backend.mongodb_local import MongoDBLocalVectorSearch
@@ -23,14 +22,18 @@ from langchain_core.embeddings import Embeddings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="MongoDB Local Vector Dashboard API")
+app = FastAPI(title="MongoDB Vector Workstation API")
 
-# --- Mock Embeddings for Demo Purposes ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Allow all for local dev convenience with dynamic ports
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Mock Embeddings ---
 class MockEmbeddings(Embeddings):
-    """
-    Deterministic fake embeddings for demo purposes.
-    Generates a vector based on the hash of the text to ensure consistency.
-    """
     def __init__(self, dimensions: int = 384):
         self.dimensions = dimensions
 
@@ -38,132 +41,112 @@ class MockEmbeddings(Embeddings):
         return [self.embed_query(text) for text in texts]
 
     def embed_query(self, text: str) -> List[float]:
-        # Create a seed from the text
         seed = int(hashlib.sha256(text.encode('utf-8')).hexdigest(), 16) % (2**32)
         np.random.seed(seed)
-        # Generate random vector, then normalize
         vector = np.random.rand(self.dimensions).astype("float32")
         norm = np.linalg.norm(vector)
-        if norm == 0:
-            return vector.tolist()
-        return (vector / norm).tolist()
-
-# --- Global Vector Store Instance ---
-vector_store: Optional[MongoDBLocalVectorSearch] = None
-mongo_client: Optional[MongoClient] = None
+        return (vector / norm).tolist() if norm > 0 else vector.tolist()
 
 # --- Models ---
-class AddDocumentsRequest(BaseModel):
-    texts: List[str]
-    metadatas: Optional[List[Dict[str, Any]]] = None
+class ConnectionRequest(BaseModel):
+    uri: str
 
-class SearchRequest(BaseModel):
+class DBListRequest(BaseModel):
+    uri: str
+
+class CollectionListRequest(BaseModel):
+    uri: str
+    database: str
+
+class VectorActionRequest(BaseModel):
+    uri: str
+    database: str
+    collection: str
+    
+class SearchRequest(VectorActionRequest):
     query: str
     k: int = 5
     filter: Optional[Dict[str, Any]] = None
+
+class AddDocsRequest(VectorActionRequest):
+    texts: List[str]
+    metadatas: Optional[List[Dict[str, Any]]] = None
 
 class SearchResult(BaseModel):
     content: str
     metadata: Dict[str, Any]
     score: float
 
-class StatsResponse(BaseModel):
-    document_count: int
-    index_type: str
-    metric: str
-    dimensions: int
-
-# --- Lifecycle ---
-@app.on_event("startup")
-async def startup_event():
-    global vector_store, mongo_client
-    
-    # Configuration
-    MONGO_URI = os.getenv("MONGODB_LOCAL_URI", "mongodb://localhost:27017/")
-    DB_NAME = "vector_store_demo"
-    COLLECTION_NAME = "vectors"
-    
+# --- Helpers ---
+def get_client(uri: str) -> MongoClient:
     try:
-        logger.info(f"Connecting to MongoDB at {MONGO_URI}...")
-        mongo_client = MongoClient(MONGO_URI)
-        collection = mongo_client[DB_NAME][COLLECTION_NAME]
-        
-        # Initialize Embeddings
-        embedder = MockEmbeddings(dimensions=384)
-        
-        # FAISS Config
-        faiss_config = {
-            'metric': 'cosine', 
-            'index_type': 'hnsw',
-            'index_params': {
-                'dimensions': 384,
-                'neighbours': 16,
-                'efSearch': 64,
-                'efConstruction': 200,
-            }
-        }
-        
-        vector_store = MongoDBLocalVectorSearch(
-            collection=collection,
-            embedder_model=embedder,
-            faiss_config=faiss_config,
-            index_name="demo_index"
-        )
-        logger.info("Vector Store Initialized Successfully.")
-        
+        return MongoClient(uri, serverSelectionTimeoutMS=2000)
     except Exception as e:
-        logger.error(f"Failed to initialize vector store: {e}")
-        # We don't raise here to allow the app to start and show status
-        vector_store = None
+        raise HTTPException(status_code=400, detail=f"Invalid Connection String: {e}")
+
+def get_vector_store(uri: str, db_name: str, coll_name: str) -> MongoDBLocalVectorSearch:
+    client = get_client(uri)
+    collection = client[db_name][coll_name]
+    embedder = MockEmbeddings(dimensions=384)
+    # Default FAISS config
+    faiss_config = {
+        'metric': 'cosine',
+        'index_type': 'hnsw',
+        'index_params': {'dimensions': 384, 'neighbours': 16, 'efSearch': 64, 'efConstruction': 200}
+    }
+    return MongoDBLocalVectorSearch(
+        collection=collection,
+        embedder_model=embedder,
+        faiss_config=faiss_config
+    )
 
 # --- Endpoints ---
 
 @app.get("/health")
 def health_check():
-    status = "healthy" if vector_store else "unhealthy"
-    return {"status": status, "backend": "active"}
+    return {"status": "active", "mode": "workstation"}
 
-@app.get("/stats", response_model=StatsResponse)
-def get_stats():
-    if not vector_store:
-        raise HTTPException(status_code=503, detail="Vector Store not initialized")
-    
-    # Get count from mongo
-    count = vector_store._collection.count_documents({})
-    
-    return {
-        "document_count": count,
-        "index_type": vector_store._faiss_config.get('index_type'),
-        "metric": vector_store._faiss_config.get('metric'),
-        "dimensions": 384 # Hardcoded for mock
-    }
-
-@app.post("/documents")
-def add_documents(request: AddDocumentsRequest):
-    if not vector_store:
-        raise HTTPException(status_code=503, detail="Vector Store not initialized")
-    
+@app.post("/connect")
+def check_connection(request: ConnectionRequest):
+    """Ping the server to verify connection."""
+    client = get_client(request.uri)
     try:
-        ids = vector_store.add_texts(
-            texts=request.texts,
-            metadatas=request.metadatas
-        )
-        return {"status": "success", "inserted_count": len(ids), "ids": [str(id) for id in ids]}
+        # Ping command
+        client.admin.command('ping')
+        return {"status": "connected", "message": "Connection successful"}
     except Exception as e:
-        logger.exception("Error adding documents")
+        logger.error(f"Connection failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Connection failed: {str(e)}")
+
+@app.post("/databases")
+def list_databases(request: DBListRequest):
+    """List all databases."""
+    client = get_client(request.uri)
+    try:
+        # Exclude system DBs if desired, or keep them. keeping 'local' is useful sometimes.
+        dbs = client.list_database_names()
+        return {"databases": dbs}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/search", response_model=List[SearchResult])
-def search(request: SearchRequest):
-    if not vector_store:
-        raise HTTPException(status_code=503, detail="Vector Store not initialized")
-    
+@app.post("/collections")
+def list_collections(request: CollectionListRequest):
+    """List collections in a specific database."""
+    client = get_client(request.uri)
     try:
-        results = vector_store.similarity_search_with_score(
-            query=request.query,
-            k=request.k,
-            pre_filter_query=request.filter
-        )
+        db = client[request.database]
+        colls = db.list_collection_names()
+        # Optional: Get stats for each connection? For now just names.
+        return {"collections": colls}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/vector/search", response_model=List[SearchResult])
+def vector_search(request: SearchRequest):
+    """Perform vector search on a specific namespace."""
+    try:
+        vs = get_vector_store(request.uri, request.database, request.collection)
+        results = vs.similarity_search_with_score(request.query, k=request.k, pre_filter_query=request.filter)
         
         response = []
         for doc, score in results:
@@ -174,5 +157,16 @@ def search(request: SearchRequest):
             ))
         return response
     except Exception as e:
-        logger.exception("Error performing search")
+        logger.exception("Search failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/vector/add")
+def add_documents(request: AddDocsRequest):
+    """Add documents to a specific namespace."""
+    try:
+        vs = get_vector_store(request.uri, request.database, request.collection)
+        ids = vs.add_texts(texts=request.texts, metadatas=request.metadatas)
+        return {"status": "success", "inserted_count": len(ids), "ids": [str(id) for id in ids]}
+    except Exception as e:
+        logger.exception("Add docs failed")
         raise HTTPException(status_code=500, detail=str(e))
