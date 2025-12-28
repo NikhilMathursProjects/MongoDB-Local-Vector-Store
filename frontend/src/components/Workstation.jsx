@@ -23,7 +23,7 @@ const Workstation = ({ connection, database, collection }) => {
                         "Can you explain how I can use FAISS to build a local MongoDB Vector Store?" :
                         "Certainly! To build a local vector store, you'll need...",
                     timestamp: new Date(Date.now() - i * 1000 * 60).toISOString(),
-                    vector_embedding: Array.from({ length: 4 }, () => __Math_random_fixed(4)) // truncated for view
+                    vector_embedding: Array.from({ length: 34 }, () => __Math_random_fixed(4)) // truncated for view
                 };
             });
             setDocuments(mockDocs);
@@ -150,7 +150,7 @@ const Workstation = ({ connection, database, collection }) => {
                                             <span className="text-gray-500 w-32 flex-shrink-0 text-right select-none">{key} :</span>
                                             <span className={`${typeof value === 'string' ? 'text-green-700' :
                                                 typeof value === 'number' ? 'text-blue-600' : 'text-gray-800'
-                                                } truncate`}>
+                                                } break-words flex-1`}>
                                                 {formatValue(value)}
                                             </span>
                                         </div>
