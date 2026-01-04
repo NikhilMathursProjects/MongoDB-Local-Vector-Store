@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Search, FileText, Settings, Database, Filter, Plus, Download, Edit3, Trash2, List, Code, MoreHorizontal, Activity } from 'lucide-react';
 import BenchmarksTab from './BenchmarksTab';
+import ValueRenderer from './ValueRenderer';
+
 
 const Workstation = ({ connection, database, collection }) => {
     const [activeTab, setActiveTab] = useState('documents'); // 'documents', 'indexes', 'search'
     const [viewMode, setViewMode] = useState('json'); // 'json', 'table'
     const [documents, setDocuments] = useState([]);
     const [loading, setLoading] = useState(false);
-
+    const [dropdownOpen, setDropdownOpen] = useState(false);
+    const [nDocuments,setNDocuments]=useState(25);
+    const [query,setQuery]=useState('');
     // Mock Data State
     useEffect(() => {
         if (connection && connection.startsWith('mock://') && collection) {
@@ -27,11 +31,71 @@ const Workstation = ({ connection, database, collection }) => {
                 };
             });
             setDocuments(mockDocs);
-        } else {
-            setDocuments([]);
-            // In real mode we'd fetch actual docs here
+        } else if(connection && database && collection) {
+            fetchDocuments()
         }
-    }, [collection, connection]);
+    }, [collection, connection,nDocuments]);
+
+
+    const fetchDocuments=async () =>{
+        console.log('fetch func called here')
+        console.log('ndocs:',nDocuments)
+        setLoading(true);
+        try{
+            const res = await fetch('http://127.0.0.1:8000/fetch_data',{
+                method: 'POST',
+                headers : {'Content-Type':'application/json'},
+                body: JSON.stringify({uri:connection,database:database,collection:collection,n:nDocuments})
+            });
+            const data=await res.json();
+            if (data.data_item_list) setDocuments(data.data_item_list);
+        }
+        catch(error){
+            //Change to popup~~~~!!!
+            console.error(error);
+        }
+        finally{
+            setLoading(false);
+        }
+    }
+
+    const handleQueryInput = (input) =>{
+        setQuery(input.target.value);
+    }
+
+    const queryDatabase = async (query) => {
+        setLoading(true);
+        console.log('querying db ,query:', query)
+        if(!query.trim()){
+            setLoading(false);
+            return;
+        }
+        let parsedQuery;
+        try{
+            parsedQuery = JSON.parse(query.toString());
+            console.log(parsedQuery);
+        } catch(e){
+            console.log(parsedQuery)
+            console.log('invalid query');
+            setLoading(false);
+            return;
+        } 
+        try{
+            const res= await fetch('http://127.0.0.1:8000/querydb',{
+                method: 'POST',
+                headers : {'Content-Type':'application/json'},
+                body: JSON.stringify({uri:connection,database:database,collection:collection,mongo_query:parsedQuery})
+            });
+            const data = await res.json();
+            if (data.data_item_list) setDocuments(data.data_item_list);
+        } catch(error){
+            //REMEMBER TO PUT PROPER ERROR MESSAGES!!
+            console.error(error)
+        }
+        finally{
+            setLoading(false);
+        }
+    }
 
     if (!database || !collection) {
         return (
@@ -85,16 +149,81 @@ const Workstation = ({ connection, database, collection }) => {
                         <div className="relative">
                             <input
                                 type="text"
-                                placeholder='{ field: "value" }'
+                                value={query}
+                                onChange={handleQueryInput}
+                                placeholder='{ "field": "value" }'
                                 className="pl-8 pr-4 py-1.5 w-64 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-green-500 outline-none font-mono"
                             />
                             <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
                         </div>
-                        <button className="px-3 py-1.5 bg-green-600 text-white text-sm font-bold rounded hover:bg-green-700 transition-colors">Find</button>
+                        <button onClick={() => queryDatabase(query)} className="px-3 py-1.5 bg-green-600 text-white text-sm font-bold rounded hover:bg-green-700 transition-colors">Find</button>
                         <button className="px-3 py-1.5 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded hover:bg-gray-50 transition-colors">Options</button>
                     </div>
 
                     <div className="flex items-center gap-2">
+                       <div className="relative">
+                        <button
+                            onClick={() => setDropdownOpen((prev) => !prev)}
+                            className="inline-flex items-center justify-center
+                                    text-black bg-white
+                                    border border-gray-300
+                                    hover:bg-gray-100
+                                    shadow-sm
+                                    font-medium
+                                    rounded-md
+                                    text-sm
+                                    px-3 py-1.5"
+                            type="button"
+                        >
+                            {nDocuments}
+                            <svg
+                            className="w-4 h-4 ml-1 text-black"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            >
+                            <path
+                                stroke="currentColor"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="2"
+                                d="m19 9-7 7-7-7"
+                            />
+                            </svg>
+                        </button>
+
+                        {dropdownOpen && (
+                            <div
+                            className="absolute right-0 mt-2 w-28
+                                        bg-white
+                                        border border-gray-300
+                                        rounded-md
+                                        shadow-lg
+                                        z-50"
+                            >
+                            <ul className="py-1 text-sm text-black">
+                                {[25, 50, 75, 100].map((value) => (
+                                <li key={value}>
+                                    <button
+                                    onClick={() => {
+                                        setNDocuments(value);
+                                        console.log('buttonclick:',nDocuments)
+                                        setDropdownOpen(false);
+                                        console.log('calling func')
+                                        // fetchDocuments(); //im not passing n data to func since im already updating it on ui
+                                    }}
+                                    className={`block w-full text-left px-4 py-2
+                                                hover:bg-gray-100
+                                                ${nDocuments === value ? "bg-gray-100 font-semibold" : ""}`}
+                                    >
+                                    {value}
+                                    </button>
+                                </li>
+                                ))}
+                            </ul>
+                            </div>
+                        )}
+                        </div>
                         <span className="text-xs text-gray-500 hidden xl:inline">1-{documents.length} of {documents.length}</span>
                         <div className="flex bg-white border border-gray-300 rounded">
                             <button
@@ -112,6 +241,7 @@ const Workstation = ({ connection, database, collection }) => {
                     </div>
                 </div>
             )}
+            {/*this is the add data, update delete etc buttons part*/}
             {activeTab === 'documents' && (
                 <div className="px-6 py-2 border-b border-gray-200 bg-white flex items-center gap-3">
                     <button className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-bold rounded shadow-sm hover:bg-green-700">
@@ -130,11 +260,11 @@ const Workstation = ({ connection, database, collection }) => {
             )}
 
             {/* Content Area */}
-            <div className="flex-1 overflow-y-auto bg-white p-6">
+            <div className="flex-1 overflow-y-auto overflow-x-visible max-w-full bg-white p-6">
 
                 {/* Documents List */}
                 {activeTab === 'documents' && (
-                    <div className="space-y-4 font-mono text-sm">
+                    <div className="space-y-2  font-mono text-sm">
                         {documents.map((doc, idx) => (
                             <div key={idx} className="border border-gray-200 rounded hover:border-green-500 hover:shadow-sm transition-all group relative">
                                 {/* Hover Actions */}
@@ -147,11 +277,12 @@ const Workstation = ({ connection, database, collection }) => {
                                 <div className="p-4 bg-white rounded">
                                     {Object.entries(doc).map(([key, value]) => (
                                         <div key={key} className="flex gap-2 leading-relaxed">
-                                            <span className="text-gray-500 w-32 flex-shrink-0 text-right select-none">{key} :</span>
-                                            <span className={`${typeof value === 'string' ? 'text-green-700' :
-                                                typeof value === 'number' ? 'text-blue-600' : 'text-gray-800'
-                                                } truncate`}>
-                                                {formatValue(value)}
+                                            <span className="text-gray-800  flex-shrink-0 select-none">{key} :</span>
+                                            <span className={`${ key ==='_id'?'text-orange-600': //can just change this to understand if key is ObjectId or something (use bson)
+                                                                typeof value === 'string' ? 'text-green-700' :
+                                                                typeof value === 'number' ? 'text-blue-600' : 'text-gray-800'
+                                                } overflow-hidden text-ellipsis text-left`}>
+                                                <ValueRenderer value={value}/>
                                             </span>
                                         </div>
                                     ))}
@@ -249,10 +380,13 @@ function __Math_random_fixed(len) {
     return Number(Math.random().toFixed(len));
 }
 
-function formatValue(value) {
-    if (Array.isArray(value)) return `[ ${value.join(', ')} ... ]`;
-    if (typeof value === 'string' && value.startsWith('ObjectId')) return <span className="text-gray-600 font-bold">{value}</span>;
-    return JSON.stringify(value);
-}
+//NO NEED FOR THIS SINCE I USE VALUERENDERER NOE
+// function formatValue(value) {
+//     // if (Array.isArray(value)) return `[ ${value.join(', ')} ... ]`;
+//     if (Array.isArray(value)) return <button
+//     onclic/>;
+//     if (typeof value === 'string' && value.startsWith('ObjectId')) return <span className="text-gray-600 font-bold">{value}</span>;
+//     return JSON.stringify(value);
+// }
 
 export default Workstation;

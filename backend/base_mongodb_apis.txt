@@ -1,0 +1,30 @@
+fetch_n_data(n): 
+    Fetches `n` data items (specified in frontend (passed to api)) | Just query mongodb collection to find data and limit(n) : db.products.find({}).limit(25); 
+    Args:
+    - n (int) : The amount of data items a user wants to see
+    Returns:
+    - JSON(n data items)
+
+fetch_connections_structure():
+    Fetches list of connections->Databases->Collections | Returns the entire structure OR I SEPARATELY FETCH CONNECTIONS LIST, THEN IF USER CONNECTS, FETCH THE DATABASE AND COLLECTIONS
+    Args:
+        None
+    Returns:
+    JSON(connections->databases->collections structure)
+
+--------------FORGET THIS ABOVE----- ITS TOO IND EPTH I CANT DO THAT-----
+
+What ill do is, for v1 ill ask the user for the mongo URI, db name, collection name
+then i can do the simple fetch n data items api, put pagination, lazy loading etc
+
+V1:
+({uri,db_name,collection_name})
+    Helps me get the collection=collection=client[db_name][collection_name]
+    which means i can also query mongodb to collect data like below function fetch_n_data.
+    
+fetch_n_data(n): 
+    Fetches `n` data items (specified in frontend (passed to api)) | Just query mongodb collection to find data and limit(n) : db.products.find({}).limit(25); 
+    Args:
+    - n (int) : The amount of data items a user wants to see
+    Returns:
+    - JSON(n data items)

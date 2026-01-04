@@ -1,12 +1,23 @@
-import os
-import logging
-from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Body
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+
+import os
+import bson
+import json
+import logging
 from pymongo import MongoClient
+from typing import (
+    Any,
+    List, 
+    Dict, 
+    Any, 
+    Optional,
+    )
+from langchain_core.embeddings import Embeddings
 import numpy as np
 import hashlib
+
 
 # Import the backend library
 try:
@@ -16,13 +27,12 @@ except ImportError:
     sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
     from backend.mongodb_local import MongoDBLocalVectorSearch
 
-from langchain_core.embeddings import Embeddings
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="MongoDB Vector Workstation API")
+app = FastAPI(title="MongoDB Vector Store Workstation,FAISS API's")
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,10 +57,15 @@ class MockEmbeddings(Embeddings):
         norm = np.linalg.norm(vector)
         return (vector / norm).tolist() if norm > 0 else vector.tolist()
 
+
+
+#may require app.state 
+
+
 # --- Models ---
 class ConnectionRequest(BaseModel):
     uri: str
-
+# 
 class DBListRequest(BaseModel):
     uri: str
 
@@ -58,6 +73,15 @@ class CollectionListRequest(BaseModel):
     uri: str
     database: str
 
+class FetchDataRequest(CollectionListRequest):
+    collection:str
+    n:int
+
+class MongoQueryRequest(CollectionListRequest):
+    collection:str
+    mongo_query:Dict[str,Any]
+
+#----VECTOR SEARCH MODELS-------
 class VectorActionRequest(BaseModel):
     uri: str
     database: str
@@ -77,12 +101,25 @@ class SearchResult(BaseModel):
     metadata: Dict[str, Any]
     score: float
 
+
+
+
 # --- Helpers ---
+#will replace with lru cache or mongoclient class {} helper
+# or replace with on app.on_event('startup/shutdown') 
+#so every function doesnt need to connect to mongoclient and return it
 def get_client(uri: str) -> MongoClient:
     try:
         return MongoClient(uri, serverSelectionTimeoutMS=2000)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid Connection String: {e}")
+
+def fetch_n_data(collection,n:int):
+    docs = list(collection.find({}, {}).limit(n))
+    for doc in docs:
+        doc['_id']=str(doc['_id'])
+    return docs
+
 
 def get_vector_store(uri: str, db_name: str, coll_name: str) -> MongoDBLocalVectorSearch:
     client = get_client(uri)
@@ -104,6 +141,7 @@ def get_vector_store(uri: str, db_name: str, coll_name: str) -> MongoDBLocalVect
 
 @app.get("/health")
 def health_check():
+    """Checks health of fastapi app"""
     return {"status": "active", "mode": "workstation"}
 
 @app.post("/connect")
@@ -117,10 +155,12 @@ def check_connection(request: ConnectionRequest):
     except Exception as e:
         logger.error(f"Connection failed: {e}")
         raise HTTPException(status_code=400, detail=f"Connection failed: {str(e)}")
-
+#only listing dbs and collections since listing connections doesnt really matter for the same mongo uri
 @app.post("/databases")
 def list_databases(request: DBListRequest):
-    """List all databases."""
+    """
+    Returns a list of all databases in a mongo uri
+    """
     client = get_client(request.uri)
     try:
         # Exclude system DBs if desired, or keep them. keeping 'local' is useful sometimes.
@@ -131,7 +171,7 @@ def list_databases(request: DBListRequest):
 
 @app.post("/collections")
 def list_collections(request: CollectionListRequest):
-    """List collections in a specific database."""
+    """Returns a list of collections in a specific database."""
     client = get_client(request.uri)
     try:
         db = client[request.database]
@@ -140,6 +180,46 @@ def list_collections(request: CollectionListRequest):
         return {"collections": colls}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/fetch_data')
+def fetch_data(req: FetchDataRequest):
+    """Returns n data items"""
+    client=get_client(req.uri)
+    try:
+        collection=client[req.database][req.collection]
+    except Exception as e:
+        raise HTTPException(status_code=400,detail='Database not connected error : {e}') 
+    docs=fetch_n_data(collection,req.n)
+    return {
+        "count": len(docs),
+        "data_item_list": docs
+    }
+
+@app.post('/querydb')
+def querydb(req:MongoQueryRequest):
+    """
+    Base MongoDB query (Exact Search)
+    Returns:
+    - count: amount of data
+    - data : the data items in a list
+    """
+    print('QUERYING DB')
+    print('query::',req.mongo_query)
+    # query=json.loads(req.mongo_query)
+    # print('json query : ',query)
+    client=get_client(req.uri)
+    try:
+        collection=client[req.database][req.collection]
+    except Exception as e:
+        raise HTTPException(status_code=400,detail='Database not connected error : {e}')
+    docs=list(collection.find(req.mongo_query))
+    for doc in docs:
+        doc['_id'] = str(doc['_id'])
+    return{
+        "count": len(docs),
+        "data_item_list": docs
+    }
 
 @app.post("/vector/search", response_model=List[SearchResult])
 def vector_search(request: SearchRequest):
@@ -170,3 +250,7 @@ def add_documents(request: AddDocsRequest):
     except Exception as e:
         logger.exception("Add docs failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("__main__:app", host="0.0.0.0",reload=True, port=8000)

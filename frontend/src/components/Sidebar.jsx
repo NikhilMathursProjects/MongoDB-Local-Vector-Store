@@ -12,7 +12,7 @@ const Sidebar = ({ activeConnection, onSelectCollection, onOpenConnection }) => 
             if (activeConnection.startsWith('mock://')) {
                 setDatabases(['admin', 'local', 'chatbot_db', 'vector_store']);
             } else {
-                fetchDatabases();
+                fetchDatabases(); //loads database list
             }
         } else {
             setDatabases([]);
@@ -30,6 +30,7 @@ const Sidebar = ({ activeConnection, onSelectCollection, onOpenConnection }) => 
             const data = await res.json();
             if (data.databases) setDatabases(data.databases);
         } catch (error) {
+            // NEED TO CHANGE THIS INTO A POPUP
             console.error(error);
         } finally {
             setLoading(false);
@@ -40,6 +41,7 @@ const Sidebar = ({ activeConnection, onSelectCollection, onOpenConnection }) => 
         setExpandedDbs(prev => {
             const isExpanded = !prev[dbName];
             if (isExpanded && !collections[dbName]) {
+                //REMEMBER TO REMOVE MOCKS
                 if (activeConnection && activeConnection.startsWith('mock://')) {
                     // Mock collections
                     const mockColls = {
@@ -96,6 +98,7 @@ const Sidebar = ({ activeConnection, onSelectCollection, onOpenConnection }) => 
                     <div>
                         <div className="flex items-center space-x-2 p-2 rounded bg-green-50 text-green-800 mb-2">
                             <Globe size={16} />
+                            {/*THIS CAN BE WHERE I PLACE THE CONNECTION NAMES ETC */}
                             <span className="text-sm font-medium truncate" title={activeConnection}>
                                 {activeConnection.includes('localhost') ? 'Localhost' : 'Remote Cluster'}
                             </span>

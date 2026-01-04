@@ -4,7 +4,7 @@ import Workstation from './components/Workstation';
 import ConnectionManager from './components/ConnectionManager';
 
 function App() {
-  const [connection, setConnection] = useState(null); // 'mongodb://...'
+  const [connection, setConnection] = useState(null); // 'mongodb://...' URI CONNECTION
   const [isConnModalOpen, setConnModalOpen] = useState(false);
 
   const [selectedDb, setSelectedDb] = useState(null);
